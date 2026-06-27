@@ -1,6 +1,9 @@
-Benchmark started at Sat Jun 27 01:44:14 AM EDT 2026
+Benchmark started at Sat Jun 27 07:32:15 AM EDT 2026
 Pairs per size: 3
 Seed: 2026
+Repetitions: 10
+Warm-up runs: 1
+MPI oversubscribe above: 4
 make: Nothing to be done for 'input_generator'.
 make: Nothing to be done for 'sequential'.
 make: Nothing to be done for 'pthreads'.
