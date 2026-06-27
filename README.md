@@ -1,43 +1,43 @@
-# Parallel Needleman-Wunsch Benchmarking Project
+# Parallel Needleman-Wunsch
 
-This project implements and benchmarks the Needleman-Wunsch global sequence alignment algorithm using four C99 implementations:
+This project implements the Needleman-Wunsch global sequence alignment algorithm in C and evaluates four execution models:
 
 - Sequential baseline
 - Pthreads wavefront parallelization
 - OpenMP wavefront parallelization
-- MPI master-worker task farming
+- MPI master-worker task distribution
 
-The repository is designed for reproducible university evaluation. All build and experiment commands use relative paths from the project root.
+The benchmark workflow is fully scriptable: it compiles all implementations, generates reproducible input data, runs the benchmark grid, and writes raw outputs plus summary CSV files.
 
-## Project Layout
+## Repository Structure
 
 ```text
 .
 |-- Makefile
 |-- README.md
 |-- run_experiments.sh
-|-- BENCHMARKING_METHODOLOGY.md
-|-- NW_Technical_Research.md
 |-- data/
 |   |-- input_generator.c
-|   `-- generated/                 created by the experiment script
+|   `-- generated/                  generated benchmark inputs
 |-- scripts/
-|   `-- run_experiments.sh
+|   `-- run_experiments.sh           benchmark driver
 |-- src/
 |   |-- sequential/main_seq.c
 |   |-- pthreads/main_pth.c
 |   |-- openmp/main_omp.c
 |   `-- mpi/main_mpi.c
 `-- results/
-    |-- benchmark_results.csv       created by the experiment script
-    |-- benchmark_raw_runs.csv      created by the experiment script
-    |-- benchmark_configurations.csv created by the experiment script
-    `-- raw_outputs/                raw program outputs and compile log
+    |-- benchmark_results.csv        summary statistics
+    |-- benchmark_raw_runs.csv       per-repetition measurements
+    |-- benchmark_configurations.csv expected benchmark grid
+    `-- raw_outputs/                 full program outputs and logs
 ```
 
-## Dependencies
+All commands use paths relative to the project root.
 
-Required on the university lab/cluster machine:
+## Requirements
+
+Required:
 
 ```text
 GCC with C99 support
@@ -46,10 +46,10 @@ Bash
 AWK
 POSIX Pthreads
 OpenMP runtime support
-MPI implementation, preferably OpenMPI >= 4.0 or MPICH equivalent
+OpenMPI >= 4.0 or MPICH equivalent
 ```
 
-On Debian, Ubuntu, or Kali:
+Install dependencies on Debian, Ubuntu, or Kali:
 
 ```bash
 sudo apt update
@@ -62,16 +62,26 @@ Optional debugging tools:
 sudo apt install -y gdb valgrind
 ```
 
-## Compilation
+## Build
 
-The recommended way to compile all implementations is:
+Build all implementations:
 
 ```bash
 make clean
 make all
 ```
 
-The Makefile builds these binaries:
+Build individual targets:
+
+```bash
+make sequential
+make pthreads
+make openmp
+make mpi
+make input_generator
+```
+
+Generated binaries:
 
 ```text
 bin/main_seq
@@ -81,7 +91,7 @@ bin/main_mpi
 bin/input_generator
 ```
 
-Exact compile commands used by the Makefile:
+Equivalent manual compile commands:
 
 ```bash
 mkdir -p bin
@@ -92,19 +102,9 @@ mpicc -std=c99 -Wall -Wextra -pedantic -O0 -g src/mpi/main_mpi.c -o bin/main_mpi
 gcc -std=c99 -Wall -Wextra -pedantic -O0 -g data/input_generator.c -o bin/input_generator
 ```
 
-Individual targets:
+## Quick Correctness Check
 
-```bash
-make sequential
-make pthreads
-make openmp
-make mpi
-make input_generator
-```
-
-## Manual Correctness Smoke Tests
-
-Run these from the project root after compilation:
+Run a small known alignment:
 
 ```bash
 printf "ACGT\nACGT\n" | ./bin/main_seq
@@ -113,7 +113,7 @@ printf "ACGT\nACGT\n" | OMP_NUM_THREADS=4 ./bin/main_omp
 printf "1\nACGT\nACGT\n" | mpirun -np 4 ./bin/main_mpi
 ```
 
-Expected result for all four:
+Expected result:
 
 ```text
 Alignment score: 4
@@ -121,7 +121,7 @@ Aligned sequence A: ACGT
 Aligned sequence B: ACGT
 ```
 
-Known reference case:
+Reference example:
 
 ```bash
 printf "GATTACA\nGCATGCG\n" | ./bin/main_seq
@@ -136,31 +136,25 @@ Expected score:
 Alignment score: 0
 ```
 
-## Reproducing the Benchmark Logbook
+## Running the Benchmark
 
-The TA should run the benchmark from the project root:
+The root-level benchmark command is:
 
 ```bash
 chmod +x run_experiments.sh scripts/run_experiments.sh
 ./run_experiments.sh
 ```
 
-Equivalent command:
+The root script delegates to `scripts/run_experiments.sh`.
 
-```bash
-bash scripts/run_experiments.sh
-```
+The benchmark driver automatically:
 
-The script automatically:
-
-- Creates required output directories.
-- Compiles the input generator and all four implementations.
-- Generates deterministic input files.
-- Runs the documented benchmark grid.
-- Saves raw program output under `results/raw_outputs/`.
-- Saves raw repetition data to `results/benchmark_raw_runs.csv`.
-- Saves summary statistics to `results/benchmark_results.csv`.
-- Saves the expected configuration grid to `results/benchmark_configurations.csv`.
+- Compiles all implementations.
+- Generates deterministic DNA sequence inputs.
+- Runs sequential, Pthreads, OpenMP, and MPI configurations.
+- Repeats each configuration for statistical stability.
+- Saves full program output.
+- Saves raw measurements and summary statistics.
 
 Default benchmark configuration:
 
@@ -174,74 +168,74 @@ Warm-up runs:      1
 MPI oversubscribe: enabled for process counts greater than 4
 ```
 
-The default run is the configuration that should be used for the final logbook and paper tables. If any parameter is changed, regenerate the logbook and report the changed parameter.
-
-## Experiment Script Options
-
-The script is controlled through environment variables:
-
-```bash
-PAIRS_PER_SIZE=3 SEED=2026 REPETITIONS=10 WARMUP_RUNS=1 ./run_experiments.sh
-```
-
-Available options:
-
-| Variable | Default | Meaning |
-|---|---:|---|
-| `PAIRS_PER_SIZE` | `3` | Number of sequence pairs generated for each input size |
-| `SEED` | `2026` | Random seed used by the input generator |
-| `REPETITIONS` | `10` | Measured repetitions per configuration |
-| `WARMUP_RUNS` | `1` | Unrecorded warm-up runs per configuration |
-| `MPI_OVERSUBSCRIBE_ABOVE` | `4` | Adds `--oversubscribe` for MPI process counts above this value |
-| `INPUT_SIZES_OVERRIDE` | unset | Space-separated replacement list of input sizes |
-| `THREAD_COUNTS_OVERRIDE` | unset | Space-separated replacement list of worker counts |
-
-Quick dry run for checking the script:
-
-```bash
-INPUT_SIZES_OVERRIDE="100" THREAD_COUNTS_OVERRIDE="1 2" REPETITIONS=2 PAIRS_PER_SIZE=1 ./run_experiments.sh
-```
-
 Full reproducibility run:
 
 ```bash
 PAIRS_PER_SIZE=3 SEED=2026 REPETITIONS=10 WARMUP_RUNS=1 ./run_experiments.sh
 ```
 
+Quick dry run:
+
+```bash
+INPUT_SIZES_OVERRIDE="100" THREAD_COUNTS_OVERRIDE="1 2" REPETITIONS=2 PAIRS_PER_SIZE=1 ./run_experiments.sh
+```
+
+Use dry runs only to validate the environment or script behavior. Use the full benchmark configuration for final reported results.
+
+## Benchmark Options
+
+The benchmark script accepts environment variables:
+
+| Variable | Default | Description |
+|---|---:|---|
+| `PAIRS_PER_SIZE` | `3` | Number of sequence pairs generated per input size |
+| `SEED` | `2026` | Random seed for input generation |
+| `REPETITIONS` | `10` | Measured repetitions per configuration |
+| `WARMUP_RUNS` | `1` | Warm-up runs before measured repetitions |
+| `MPI_OVERSUBSCRIBE_ABOVE` | `4` | Adds `--oversubscribe` above this MPI process count |
+| `INPUT_SIZES_OVERRIDE` | unset | Space-separated replacement list of input sizes |
+| `THREAD_COUNTS_OVERRIDE` | unset | Space-separated replacement list of worker counts |
+
+Example:
+
+```bash
+PAIRS_PER_SIZE=5 SEED=1234 REPETITIONS=5 ./run_experiments.sh
+```
+
 ## Output Files
 
-All result paths are relative to the project root.
+The benchmark creates all output under `results/`.
 
-| File or Directory | Purpose |
+| Path | Description |
 |---|---|
-| `results/raw_outputs/compile.log` | Build log and experiment settings |
-| `results/raw_outputs/*.txt` | Raw stdout/stderr for individual program runs |
-| `results/raw_outputs/*.times` | Per-pair times for sequential, Pthreads, and OpenMP runs |
+| `results/raw_outputs/compile.log` | Compilation log and benchmark settings |
+| `results/raw_outputs/*.txt` | Full stdout/stderr for individual runs |
+| `results/raw_outputs/*.times` | Per-pair timings for sequential, Pthreads, and OpenMP runs |
 | `results/benchmark_raw_runs.csv` | One row per measured repetition |
-| `results/benchmark_results.csv` | Mean, standard deviation, median, min, max, speedup, efficiency |
-| `results/benchmark_configurations.csv` | Expected benchmark grid |
+| `results/benchmark_results.csv` | Aggregated timing statistics, speedup, and efficiency |
+| `results/benchmark_configurations.csv` | Benchmark grid that was executed |
 
-Summary CSV columns:
+Summary CSV schema:
 
 ```csv
 Algorithm,InputSize,Threads,Processes,MeanTime,StdDev,MedianTime,MinTime,MaxTime,OutliersRemoved,ValidRuns,Speedup,Efficiency,Notes
 ```
 
-Raw repetition CSV columns:
+Raw run CSV schema:
 
 ```csv
 RunID,Algorithm,InputSize,Threads,Processes,PairsPerSize,ExecutionTime,Status,Notes
 ```
 
-## Verifying Completion
+## Validating Results
 
-After the benchmark finishes, check for failed runs:
+Check for failed repetitions:
 
 ```bash
 awk -F, '$8 != "Status" && $8 != "OK" { print }' results/benchmark_raw_runs.csv
 ```
 
-No output means every recorded repetition completed successfully.
+No output means all measured repetitions completed successfully.
 
 Check for incomplete summary rows:
 
@@ -251,23 +245,18 @@ awk -F, '$11 == 0 || $5 == "NA" { print }' results/benchmark_results.csv
 
 No output means every summary row has valid timing data.
 
-Check the produced grid:
+Review the executed benchmark grid:
 
 ```bash
 cat results/benchmark_configurations.csv
 ```
 
-## Manual Input Generation
+## Input Generation
 
-The input generator creates files in the format required by the MPI program:
+The input generator creates random DNA sequences over:
 
 ```text
-number_of_pairs
-sequence_A_pair_0
-sequence_B_pair_0
-sequence_A_pair_1
-sequence_B_pair_1
-...
+A C G T
 ```
 
 Manual generation:
@@ -278,15 +267,21 @@ mkdir -p data/generated
 ./bin/input_generator data/generated 3 2026
 ```
 
-Generated files:
+Input file format:
 
 ```text
-data/generated/input_len_100_pairs_3.txt
-data/generated/input_len_500_pairs_3.txt
-data/generated/input_len_1000_pairs_3.txt
-data/generated/input_len_5000_pairs_3.txt
-data/generated/input_len_10000_pairs_3.txt
-data/generated/input_len_50000_pairs_3.txt
+number_of_pairs
+sequence_A_pair_0
+sequence_B_pair_0
+sequence_A_pair_1
+sequence_B_pair_1
+...
+```
+
+Generated files use this naming pattern:
+
+```text
+data/generated/input_len_<length>_pairs_<count>.txt
 ```
 
 ## Manual Program Usage
@@ -321,48 +316,51 @@ MPI with generated input:
 mpirun -np 4 ./bin/main_mpi < data/generated/input_len_100_pairs_3.txt
 ```
 
-MPI with oversubscription for 8 processes:
+MPI with oversubscription:
 
 ```bash
 mpirun --oversubscribe -np 8 ./bin/main_mpi < data/generated/input_len_100_pairs_3.txt
 ```
 
-## Reproducibility Notes for the TA
+## Reproducibility Notes
 
-The numbers in the paper/logbook should be generated using:
-
-```bash
-PAIRS_PER_SIZE=3 SEED=2026 REPETITIONS=10 WARMUP_RUNS=1 ./run_experiments.sh
-```
-
-If the TA reruns the script on different hardware, exact times may differ, but the relative behavior should be reasonable:
-
-- Very small inputs may show poor parallel speedup because thread/process overhead dominates.
-- MPI with 8 processes may be marked `oversubscribed` on machines with fewer than 8 available slots.
-- The `50000` input may require very large memory because the algorithm stores full score and traceback matrices.
-- If a run is interrupted, the CSV may be incomplete. Rerun the script to regenerate the complete result set.
-
-For reproducible reporting, include:
+For reproducible reporting, record:
 
 ```text
 CPU model
-Core/thread count
+Core and thread count
 RAM size
-OS and kernel
+Operating system and kernel
 GCC version
-MPI implementation/version
+MPI implementation and version
 OpenMP support
 Compiler flags
-Seed
+Input seed
 Pairs per size
-Repetitions
+Repetition count
 ```
+
+Suggested commands:
+
+```bash
+lscpu
+free -h
+uname -a
+gcc --version
+mpicc --version
+mpirun --version
+```
+
+Performance notes:
+
+- Small inputs may show poor parallel speedup because synchronization and startup overhead dominate.
+- MPI process counts above available physical cores may require oversubscription and should be interpreted carefully.
+- The `50000` input can require very large memory because full score and traceback matrices are stored.
+- If a benchmark run is interrupted, rerun the script to regenerate a complete result set.
 
 ## Troubleshooting
 
 `make: command not found`
-
-Install GNU Make and build tools:
 
 ```bash
 sudo apt install -y build-essential
@@ -370,28 +368,26 @@ sudo apt install -y build-essential
 
 `mpicc: command not found` or `mpirun: command not found`
 
-Install MPI:
-
 ```bash
 sudo apt install -y openmpi-bin libopenmpi-dev
 ```
 
-OpenMPI refuses 8 processes because there are not enough slots:
+OpenMPI reports insufficient slots for 8 processes:
 
 ```bash
 mpirun --oversubscribe -np 8 ./bin/main_mpi < data/generated/input_len_100_pairs_3.txt
 ```
 
-The experiment script already applies `--oversubscribe` for MPI process counts greater than 4 by default.
+The benchmark script applies `--oversubscribe` automatically for MPI process counts greater than 4 by default.
 
-Benchmark takes too long:
+Benchmark run is too long:
 
 ```bash
 INPUT_SIZES_OVERRIDE="100 500 1000" REPETITIONS=3 ./run_experiments.sh
 ```
 
-Use shortened runs only for testing the script. Do not use shortened runs for the final logbook unless the paper states the changed configuration.
+Use shortened runs for environment checks only. Final reported results should use the documented full configuration.
 
 Very large input fails:
 
-Needleman-Wunsch uses a full `(m + 1) x (n + 1)` dynamic programming matrix. The `50000` case may exceed VM or lab-machine memory. Report this as a memory limitation if it occurs.
+Needleman-Wunsch stores a full `(m + 1) x (n + 1)` dynamic programming matrix. The `50000` case may exceed available memory on small VMs or lab machines.
