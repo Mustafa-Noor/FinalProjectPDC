@@ -139,9 +139,17 @@ run_mpi_batch() {
     local raw_file="$RAW_DIR/mpi_len_${size}_processes_${processes}.txt"
 
     if command -v mpirun >/dev/null 2>&1; then
-        mpirun -np "$processes" ./bin/main_mpi < "$input_file" > "$raw_file" 2>&1
+        if (( processes > 4 )); then
+            mpirun --oversubscribe -np "$processes" ./bin/main_mpi < "$input_file" > "$raw_file" 2>&1
+        else
+            mpirun -np "$processes" ./bin/main_mpi < "$input_file" > "$raw_file" 2>&1
+        fi
     elif command -v mpiexec >/dev/null 2>&1; then
-        mpiexec -n "$processes" ./bin/main_mpi < "$input_file" > "$raw_file" 2>&1
+        if (( processes > 4 )); then
+            mpiexec --oversubscribe -n "$processes" ./bin/main_mpi < "$input_file" > "$raw_file" 2>&1
+        else
+            mpiexec -n "$processes" ./bin/main_mpi < "$input_file" > "$raw_file" 2>&1
+        fi
     else
         echo "MPI launcher not found." > "$raw_file"
         echo "NA"
