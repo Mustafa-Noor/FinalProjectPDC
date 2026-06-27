@@ -1,0 +1,16 @@
+Benchmark started at Sat Jun 27 01:44:14 AM EDT 2026
+Pairs per size: 3
+Seed: 2026
+make: Nothing to be done for 'input_generator'.
+make: Nothing to be done for 'sequential'.
+make: Nothing to be done for 'pthreads'.
+make: Nothing to be done for 'openmp'.
+make: Nothing to be done for 'mpi'.
+Seed: 2026
+Pairs per size: 3
+Generated data/generated/input_len_100_pairs_3.txt
+Generated data/generated/input_len_500_pairs_3.txt
+Generated data/generated/input_len_1000_pairs_3.txt
+Generated data/generated/input_len_5000_pairs_3.txt
+Generated data/generated/input_len_10000_pairs_3.txt
+Generated data/generated/input_len_50000_pairs_3.txt
