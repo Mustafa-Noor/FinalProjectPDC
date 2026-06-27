@@ -1,24 +1,24 @@
-﻿# Benchmarking Methodology for Parallel Needleman-Wunsch
+# Benchmarking Methodology for Parallel Needleman-Wunsch
 
 ## 1. Objective
 
-This document defines a reproducible benchmarking methodology for evaluating four implementations of the Needleman-Wunsch global sequence alignment algorithm:
+This methodology defines a reproducible, IEEE-style experimental plan for evaluating four implementations of the Needleman-Wunsch global sequence alignment algorithm:
 
 - Sequential baseline
 - Pthreads wavefront implementation
 - OpenMP wavefront implementation
 - MPI master-worker implementation
 
-The goal is to measure execution time, strong scaling, weak scaling, speedup, and efficiency in a way suitable for a university report or IEEE-style experimental evaluation section.
+The experiments measure execution time, strong scaling, weak scaling, speedup, efficiency, and implementation overheads. Correctness must be verified before any timing result is accepted.
 
 ## 2. Implementations Under Test
 
-| Implementation | Parallel Model | Purpose |
+| Implementation | Parallel Model | Description |
 |---|---|---|
-| Sequential | Single-threaded | Baseline for correctness and speedup |
-| Pthreads | Shared-memory threads | Manual wavefront parallelization |
-| OpenMP | Shared-memory compiler directives | Directive-based wavefront parallelization |
-| MPI | Distributed processes | Master-worker task farming |
+| Sequential | Single thread | Baseline implementation used for correctness and speedup |
+| Pthreads | Shared-memory threads | Manual wavefront parallelization using anti-diagonal barriers |
+| OpenMP | Shared-memory threads | Compiler-directed wavefront parallelization using `parallel for` |
+| MPI | Distributed processes | Master-worker task farming over independent sequence pairs |
 
 All implementations must use the same scoring scheme:
 
@@ -28,47 +28,116 @@ Mismatch: -1
 Gap:      -1
 ```
 
-All parallel results must be compared against the sequential baseline before performance numbers are accepted.
+All implementations must use the same deterministic traceback tie-breaking policy. This ensures that alignment scores and traceback outputs can be compared directly.
 
-## 3. Input Sizes
+## 3. Experimental Platform
 
-Use the following sequence lengths:
+Before collecting benchmark results, record the full execution environment:
 
 ```text
-100
-500
-1000
-5000
-10000
-50000
+CPU model
+Number of physical cores
+Number of hardware threads
+RAM size
+Cache hierarchy if available
+Operating system and kernel version
+Compiler name and version
+Compiler flags
+OpenMP runtime version
+MPI implementation and version
+Virtual machine configuration if applicable
+Random seed
+Number of repetitions
+Outlier removal method
 ```
 
-For each input size, generate random DNA sequences using the alphabet:
+Suggested commands:
+
+```bash
+lscpu
+free -h
+uname -a
+gcc --version
+mpicc --version
+mpirun --version
+```
+
+If MPI runs with 8 processes on a VM with fewer than 8 available execution slots, use OpenMPI oversubscription:
+
+```bash
+mpirun --oversubscribe -np 8 ./bin/main_mpi
+```
+
+Oversubscribed runs should be labeled clearly. They are useful for functional scaling comparison, but they do not represent true physical-core scaling.
+
+## 4. Inputs
+
+Use random DNA sequences over this alphabet:
 
 ```text
 A C G T
 ```
 
-Use a fixed random seed for reproducibility.
+Use a fixed seed for reproducibility. The required input sizes are:
 
-## 4. Thread and Process Counts
+| Input Size | Matrix Dimensions | Approximate DP Cells |
+|---:|---:|---:|
+| 100 | 101 x 101 | 10,201 |
+| 500 | 501 x 501 | 251,001 |
+| 1000 | 1001 x 1001 | 1,002,001 |
+| 5000 | 5001 x 5001 | 25,010,001 |
+| 10000 | 10001 x 10001 | 100,020,001 |
+| 50000 | 50001 x 50001 | 2,500,100,001 |
+
+The `50000` case is extremely memory intensive because this project stores the full score and direction matrices. Run it only if the machine has sufficient RAM. If it cannot complete, report it as a memory-capacity limit rather than silently removing it.
+
+Use the same generated sequence pairs for every implementation.
+
+## 5. Worker Counts
 
 Use the following worker counts:
 
 ```text
-1
-2
-4
-8
+1, 2, 4, 8
 ```
 
-For Pthreads and OpenMP, these represent thread counts.
+Interpretation:
 
-For MPI, these represent process counts.
+| Implementation | Worker Meaning |
+|---|---|
+| Sequential | Always 1 |
+| Pthreads | Thread count |
+| OpenMP | `OMP_NUM_THREADS` |
+| MPI | Process count |
 
-## 5. Metrics
+## 6. Correctness Requirement
 
-### 5.1 Execution Time
+Before benchmarking, each parallel implementation must be compared against the sequential baseline.
+
+Record:
+
+```text
+Input sequence A
+Input sequence B
+Sequential score
+Parallel score
+Sequential aligned A
+Parallel aligned A
+Sequential aligned B
+Parallel aligned B
+Pass/fail status
+```
+
+A timing result is valid only if:
+
+- The program exits successfully.
+- The alignment score matches the sequential baseline.
+- The traceback score matches the DP matrix score.
+- The traceback output matches the baseline when deterministic tie-breaking is used.
+
+## 7. Metrics
+
+### 7.1 Execution Time
 
 Execution time is the wall-clock time required to complete an alignment workload.
 
@@ -76,53 +145,65 @@ Execution time is the wall-clock time required to complete an alignment workload
 T = execution time in seconds
 ```
 
-Use wall-clock timers:
+Use implementation-appropriate timers:
 
-- Sequential: standard timing function used in the implementation
-- Pthreads: `clock_gettime()` or equivalent wall-clock timing
-- OpenMP: `omp_get_wtime()`
-- MPI: `MPI_Wtime()`
+| Implementation | Recommended Timer |
+|---|---|
+| Sequential | wall-clock timer or `clock()` if already used |
+| Pthreads | `clock_gettime(CLOCK_MONOTONIC)` |
+| OpenMP | `omp_get_wtime()` |
+| MPI | `MPI_Wtime()` |
 
-### 5.2 Speedup
+For fair reporting, define whether timing includes only computation or includes input/output. Use the same policy throughout the study.
 
-Speedup measures how much faster the parallel implementation is compared with the sequential baseline.
+### 7.2 Speedup
+
+Speedup measures how much faster a parallel run is than the sequential baseline.
 
 ```text
-Speedup(p) = T_sequential / T_parallel(p)
+Speedup(p) = T_seq / T_parallel(p)
 ```
 
-Where `p` is the number of threads or processes.
+Where:
 
-### 5.3 Efficiency
+```text
+p = number of threads or processes
+T_seq = sequential execution time
+T_parallel(p) = parallel execution time using p workers
+```
 
-Efficiency measures how effectively the available workers are used.
+### 7.3 Efficiency
+
+Efficiency measures how effectively the workers are used.
 
 ```text
 Efficiency(p) = Speedup(p) / p
 ```
 
-Ideal efficiency is `1.0`. In practice, efficiency decreases as worker count increases because of synchronization, communication, memory bandwidth limits, and load imbalance.
+Ideal efficiency is `1.0`. Values below `1.0` indicate synchronization, communication, memory, scheduling, or load-balance overhead. Values above `1.0` may occur because of measurement noise, cache effects, or workload differences, and should be interpreted cautiously.
 
-### 5.4 Parallel Fraction
+### 7.4 Parallel Fraction
 
-The parallel fraction is the portion of the program that can benefit from parallel execution.
-
-A high parallel fraction usually leads to better scalability.
+The parallel fraction is the portion of runtime that can be accelerated by parallel workers.
 
 Sequential portions include:
 
 - Input reading
+- Matrix allocation
 - Matrix initialization
 - Traceback
-- Thread/process setup
-- Synchronization overhead
-- Communication overhead
+- Thread creation
+- MPI process startup
+- Synchronization barriers
+- Communication and result collection
 
-## 6. Scaling Laws
+Estimate the parallel fraction from measured speedup using Amdahl's Law when useful.
 
-### 6.1 Amdahl's Law
+## 8. Scaling Laws
 
-Amdahl's Law describes the maximum possible speedup for a fixed problem size.
+### 8.1 Amdahl's Law
+
+Amdahl's Law models strong scaling for a fixed problem size:
 
 ```text
 Speedup(p) = 1 / ((1 - f) + f / p)
@@ -135,11 +216,13 @@ f = parallel fraction
 p = number of workers
 ```
 
-Amdahl's Law explains why speedup eventually stops improving even when more threads or processes are added.
+Interpretation:
 
-### 6.2 Gustafson's Law
+Even if most of the program is parallel, the remaining serial fraction limits maximum speedup. In this project, traceback, initialization, synchronization, and communication reduce the achievable speedup.
 
-Gustafson's Law describes scaling when the problem size increases with the number of workers.
+### 8.2 Gustafson's Law
+
+Gustafson's Law models scaled workloads where the problem size grows with the number of workers:
 
 ```text
 ScaledSpeedup(p) = p - alpha(p - 1)
@@ -152,13 +235,59 @@ alpha = serial fraction
 p = number of workers
 ```
 
-This is important for Needleman-Wunsch because larger matrices provide more parallel work.
+Interpretation:
 
-## 7. Strong Scaling Experiment
+Needleman-Wunsch has `O(mn)` work. Larger matrices contain much more parallel work, so weak scaling can look better than strong scaling if the machine has enough memory bandwidth and capacity.
+
+## 9. Experiment 1: Execution Time vs Input Size
 
 ### Purpose
 
-Measure how runtime changes when the input size is fixed and the number of workers increases.
+Measure how runtime grows as sequence length increases.
+
+### Configuration
+
+Run all implementations using representative worker counts:
+
+| Implementation | Worker Count |
+|---|---:|
+| Sequential | 1 |
+| Pthreads | 4 or best available |
+| OpenMP | 4 or best available |
+| MPI | 4 or best available |
+
+Use input sizes:
+
+```text
+100, 500, 1000, 5000, 10000, 50000
+```
+
+### Expected Outcome
+
+Runtime should grow approximately quadratically with sequence length because the DP matrix has `O(n^2)` cells for equal-length sequences.
+
+### Record
+
+```text
+Algorithm
+Input size
+Sequence lengths
+Workers
+Execution time
+Score
+Correctness status
+Peak memory if available
+```
+
+### Repetitions
+
+Run at least 5 repetitions. For final IEEE-style results, run 10 repetitions.
+
+## 10. Experiment 2: Strong Scaling
+
+### Purpose
+
+Measure how runtime changes when the input size is fixed and worker count increases.
 
 ### Configuration
 
@@ -168,68 +297,74 @@ For each input size:
 100, 500, 1000, 5000, 10000, 50000
 ```
 
-Run each implementation with:
+Run:
 
 ```text
-1, 2, 4, 8 workers
+Pthreads: 1, 2, 4, 8 threads
+OpenMP:   1, 2, 4, 8 threads
+MPI:      1, 2, 4, 8 processes
 ```
 
 ### Expected Outcome
 
-Runtime should decrease as worker count increases, but speedup will usually be sublinear.
-
-Small inputs may show poor scaling because overhead dominates computation.
-
-Large inputs should scale better because the dynamic programming matrix contains more work.
+Small inputs may slow down as workers increase because overhead dominates. Larger inputs should show better speedup until limited by synchronization, memory bandwidth, cache effects, or communication overhead.
 
 ### Record
 
 ```text
 Algorithm
 Input size
-Threads
-Processes
-Execution time
+Workers
+Mean execution time
+Standard deviation
+Minimum time
+Maximum time
 Speedup
 Efficiency
 Correctness status
 ```
 
-## 8. Weak Scaling Experiment
+### Repetitions
+
+Use 10 repetitions for final reporting. Use a warm-up run before measured repetitions.
+
+## 11. Experiment 3: Weak Scaling
 
 ### Purpose
 
-Measure whether runtime remains stable as both workload and worker count increase.
+Measure whether runtime remains stable when both the workload and worker count increase.
 
-Needleman-Wunsch has `O(n^2)` work. To keep work per worker approximately constant:
+Needleman-Wunsch has `O(n^2)` work for equal-length sequences. To keep work per worker approximately constant:
 
 ```text
 n_p = n_1 * sqrt(p)
 ```
 
-Example:
+### Preferred Weak Scaling Plan
 
-| Workers | Suggested Input Size |
+| Workers | Suggested Size |
 |---:|---:|
 | 1 | 1000 |
 | 2 | 1414 |
 | 4 | 2000 |
 | 8 | 2828 |
 
-If the project must use only the required input sizes, use an approximate mapping:
+### Required-Size Approximation
 
-| Workers | Required Input Size Approximation |
+If only the required input sizes may be used:
+
+| Workers | Approximate Required Size |
 |---:|---:|
 | 1 | 1000 |
 | 2 | 1000 or 5000 |
 | 4 | 5000 |
 | 8 | 10000 |
 
+The preferred plan is more mathematically accurate. The required-size approximation is acceptable if the report clearly states that it is approximate.
+
 ### Expected Outcome
 
-Ideal weak scaling keeps runtime nearly constant.
-
-Increasing runtime indicates synchronization overhead, memory bandwidth limits, cache effects, or MPI communication overhead.
+Ideal weak scaling keeps runtime approximately constant. Increasing runtime indicates synchronization overhead, cache effects, communication overhead, memory bandwidth limits, or load imbalance.
 
 ### Record
 
@@ -237,8 +372,10 @@ Increasing runtime indicates synchronization overhead, memory bandwidth limits, 
 Algorithm
 Workers
 Input size
-Execution time
+Mean execution time
+Standard deviation
 Weak scaling efficiency
+Correctness status
 ```
 
 Weak scaling efficiency:
@@ -247,30 +384,104 @@ Weak scaling efficiency:
 E_weak(p) = T_1 / T_p
 ```
 
-## 9. Repetitions and Averaging
+### Repetitions
 
-Run each configuration at least:
+Use 10 repetitions for final reporting.
+
+## 12. Experiment 4: Pthreads vs OpenMP
+
+### Purpose
+
+Compare manual thread management against compiler-directed parallelism for the same wavefront algorithm.
+
+### Configuration
+
+Run Pthreads and OpenMP at:
 
 ```text
-5 repetitions minimum
-10 repetitions recommended
+1, 2, 4, 8 threads
 ```
 
-For IEEE-style reporting, use 10 repetitions and report:
+Use all input sizes.
+
+### Expected Outcome
+
+OpenMP may have lower development complexity and reasonable performance. Pthreads may expose more overhead depending on barrier cost, chunking, and thread management. Both may suffer from wavefront synchronization and memory bandwidth limits.
+
+### Record
 
 ```text
-Mean runtime
+Algorithm
+Input size
+Thread count
+Mean execution time
+Speedup
+Efficiency
+Correctness status
+```
+
+## 13. Experiment 5: MPI vs OpenMP
+
+### Purpose
+
+Compare distributed-process task farming with shared-memory threading.
+
+### Configuration
+
+Run:
+
+```text
+OpenMP: 1, 2, 4, 8 threads
+MPI:    1, 2, 4, 8 processes
+```
+
+Use the same sequence-pair workload.
+
+### Expected Outcome
+
+OpenMP should usually be better for a single alignment on one shared-memory machine. MPI can perform well when there are multiple independent sequence pairs because the master can distribute separate alignments across workers.
+
+### Record
+
+```text
+Algorithm
+Input size
+Workers
+Execution time
+Speedup
+Efficiency
+Number of sequence pairs
+Correctness status
+```
+
+## 14. Repetitions, Averaging, and Outliers
+
+### Repetitions
+
+Use:
+
+```text
+Minimum:     5 repetitions
+Recommended: 10 repetitions
+```
+
+For publication-quality results, use 10 measured repetitions after one unrecorded warm-up run.
+
+### Averaging
+
+Compute the arithmetic mean after removing outliers:
+
+```text
+Mean = sum(valid runtimes) / number of valid runtimes
+```
+
+Also report:
+
+```text
 Standard deviation
-Minimum runtime
-Maximum runtime
-```
-
-### Averaging Method
-
-Use the arithmetic mean after outlier removal.
-
-```text
-Mean = sum(valid runtimes) / number of valid runs
+Minimum
+Maximum
+Median
 ```
 
 ### Outlier Detection
@@ -286,207 +497,261 @@ Lower bound = Q1 - 1.5 * IQR
 Upper bound = Q3 + 1.5 * IQR
 ```
 
-Reject runtimes outside this range.
+Reject runtimes below the lower bound or above the upper bound. Report how many samples were rejected. If only 5 repetitions are available, use either IQR or a trimmed mean by removing the minimum and maximum values.
 
-If only 5 repetitions are used, an alternative is to remove the minimum and maximum values and average the remaining 3.
+## 15. Overheads to Analyze
 
-## 10. Overheads to Analyze
+### 15.1 Barrier Overhead
 
-### 10.1 Barrier Overhead
+Pthreads and OpenMP wavefront implementations require synchronization after every anti-diagonal. This is necessary because cells on diagonal `d + 1` depend on cells from diagonal `d`.
 
-Wavefront parallelization requires synchronization between anti-diagonals.
+Expected effect:
 
-The next anti-diagonal cannot begin until the previous anti-diagonal is complete.
+- High overhead for small matrices
+- Reduced benefit from additional threads
+- Better scaling for larger matrices where each diagonal has more cells
 
-This creates barrier overhead, especially for small matrices.
+### 15.2 Communication Overhead
 
-### 10.2 Communication Overhead
+MPI introduces communication between the master and workers.
 
-MPI requires communication between the master and worker processes.
-
-Communication overhead includes:
+Sources:
 
 - Sending sequence pairs
 - Receiving scores and alignments
-- Worker startup cost
 - Message latency
-- Serialization of task distribution at rank 0
+- Master-side scheduling
+- Result collection
 
-MPI overhead is most visible for small inputs.
+Expected effect:
 
-### 10.3 Load Imbalance
+- MPI overhead is visible for small inputs
+- MPI becomes more useful for batches of independent alignments
 
-Load imbalance can occur because:
+### 15.3 Load Imbalance
 
-- Early and late anti-diagonals contain fewer cells
-- Different sequence pairs may have different lengths
-- MPI workers may finish at different times
+Load imbalance occurs when workers receive unequal amounts of useful work.
 
-Dynamic task farming helps reduce MPI load imbalance.
+Sources:
 
-### 10.4 False Sharing
+- Early and late wavefront diagonals have fewer cells
+- MPI workers may receive tasks with different sequence lengths
+- Oversubscribed processes compete for CPU time
 
-False sharing occurs when multiple threads write different data that lies on the same cache line.
+Expected effect:
 
-This can slow down Pthreads and OpenMP even when there is no correctness race.
+- Some workers finish earlier and wait
+- Efficiency decreases as worker count increases
 
-### 10.5 Cache Locality
+### 15.4 False Sharing
 
-Sequential row-major filling has strong spatial locality.
+False sharing occurs when multiple threads update different memory locations that reside on the same cache line.
 
-Wavefront traversal may reduce locality because cells on the same anti-diagonal are not always contiguous in memory.
+Expected effect:
 
-### 10.6 Memory Bandwidth
+- No correctness failure
+- Increased cache coherence traffic
+- Lower Pthreads/OpenMP speedup
 
-Large Needleman-Wunsch matrices can become memory-bandwidth-bound.
+### 15.5 Cache Locality
 
-Adding more threads may stop improving performance when memory bandwidth is saturated.
+Sequential row-major DP filling has good spatial locality. Wavefront traversal accesses cells along anti-diagonals, which may be less contiguous in row-major memory.
 
-## 11. CSV Templates
+Expected effect:
 
-### 11.1 Raw Run CSV
+- Sequential may perform surprisingly well
+- Parallel wavefront may lose cache efficiency
+- Large matrices may suffer more cache misses
 
-```csv
-RunID,Algorithm,InputSize,SeqA_Length,SeqB_Length,Threads,Processes,ExecutionTime,Score,Correct
-1,Sequential,1000,1000,1000,1,1,0.000000,0,Yes
-1,Pthreads,1000,1000,1000,4,1,0.000000,0,Yes
-1,OpenMP,1000,1000,1000,4,1,0.000000,0,Yes
-1,MPI,1000,1000,1000,1,4,0.000000,0,Yes
-```
+### 15.6 Memory Bandwidth
 
-### 11.2 Summary CSV
+Needleman-Wunsch stores and updates large matrices. For large inputs, performance may become limited by memory bandwidth rather than CPU arithmetic.
 
-```csv
-Algorithm,InputSize,Threads,Processes,MeanTime,StdDev,MinTime,MaxTime,Speedup,Efficiency
-Sequential,1000,1,1,0.000000,0.000000,0.000000,0.000000,1.000000,1.000000
-Pthreads,1000,4,1,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
-OpenMP,1000,4,1,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
-MPI,1000,1,4,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
-```
+Expected effect:
 
-### 11.3 Strong Scaling CSV
+- Speedup plateaus
+- Additional threads provide little benefit
+- Very large inputs may fail due to memory capacity
 
-```csv
-Algorithm,InputSize,Workers,T1,Tp,Speedup,Efficiency
-Pthreads,5000,1,0.000000,0.000000,1.000000,1.000000
-Pthreads,5000,2,0.000000,0.000000,0.000000,0.000000
-Pthreads,5000,4,0.000000,0.000000,0.000000,0.000000
-Pthreads,5000,8,0.000000,0.000000,0.000000,0.000000
-```
+## 16. CSV Templates
 
-### 11.4 Weak Scaling CSV
+### 16.1 Raw Repetition CSV
 
 ```csv
-Algorithm,Workers,InputSize,ExecutionTime,WeakScalingEfficiency
-OpenMP,1,1000,0.000000,1.000000
-OpenMP,2,1414,0.000000,0.000000
-OpenMP,4,2000,0.000000,0.000000
-OpenMP,8,2828,0.000000,0.000000
+RunID,Algorithm,InputSize,SeqA_Length,SeqB_Length,Threads,Processes,ExecutionTime,Score,Correct,Notes
+1,Sequential,1000,1000,1000,1,1,0.000000,0,Yes,
+1,Pthreads,1000,1000,1000,4,1,0.000000,0,Yes,
+1,OpenMP,1000,1000,1000,4,1,0.000000,0,Yes,
+1,MPI,1000,1000,1000,1,4,0.000000,0,Yes,
 ```
 
-## 12. Graph Design
+### 16.2 Summary CSV
 
-### 12.1 Execution Time vs Input Size
+```csv
+Algorithm,InputSize,Threads,Processes,MeanTime,StdDev,Median,MinTime,MaxTime,OutliersRemoved,Speedup,Efficiency,Correct
+Sequential,1000,1,1,0.000000,0.000000,0.000000,0.000000,0.000000,0,1.000000,1.000000,Yes
+Pthreads,1000,4,1,0.000000,0.000000,0.000000,0.000000,0.000000,0,0.000000,0.000000,Yes
+OpenMP,1000,4,1,0.000000,0.000000,0.000000,0.000000,0.000000,0,0.000000,0.000000,Yes
+MPI,1000,1,4,0.000000,0.000000,0.000000,0.000000,0.000000,0,0.000000,0.000000,Yes
+```
+
+### 16.3 Strong Scaling CSV
+
+```csv
+Algorithm,InputSize,Workers,T1,Tp,Speedup,Efficiency,StdDev,Correct
+Pthreads,5000,1,0.000000,0.000000,1.000000,1.000000,0.000000,Yes
+Pthreads,5000,2,0.000000,0.000000,0.000000,0.000000,0.000000,Yes
+Pthreads,5000,4,0.000000,0.000000,0.000000,0.000000,0.000000,Yes
+Pthreads,5000,8,0.000000,0.000000,0.000000,0.000000,0.000000,Yes
+```
+
+### 16.4 Weak Scaling CSV
+
+```csv
+Algorithm,Workers,InputSize,MeanTime,T1,WeakScalingEfficiency,StdDev,Correct
+OpenMP,1,1000,0.000000,0.000000,1.000000,0.000000,Yes
+OpenMP,2,1414,0.000000,0.000000,0.000000,0.000000,Yes
+OpenMP,4,2000,0.000000,0.000000,0.000000,0.000000,Yes
+OpenMP,8,2828,0.000000,0.000000,0.000000,0.000000,Yes
+```
+
+### 16.5 Correctness CSV
+
+```csv
+CaseID,SeqA,SeqB,ExpectedScore,SequentialScore,PthreadsScore,OpenMPScore,MPIScore,TracebackMatch,Pass
+T001,ACGT,ACGT,4,4,4,4,4,Yes,Yes
+```
+
+## 17. Publication-Quality Graphs
+
+Use clear axis labels, units, legends, and captions. Use logarithmic y-axes when runtime spans several orders of magnitude. Include error bars using standard deviation or confidence intervals.
+
+### 17.1 Execution Time vs Input Size
+
+Design:
 
 ```text
 X-axis: Input size
-Y-axis: Execution time in seconds
-Scale: Log scale recommended
+Y-axis: Mean execution time in seconds
+Scale: Log-log recommended
 Lines: Sequential, Pthreads, OpenMP, MPI
+Error bars: Standard deviation
 ```
 
 Interpretation:
 
-This graph shows how runtime grows with problem size. Since Needleman-Wunsch is `O(n^2)`, execution time should grow rapidly as input size increases.
+This graph shows how runtime grows with sequence length. A quadratic trend is expected. Deviations may indicate cache effects, memory bandwidth saturation, or overhead domination for small inputs.
 
-### 12.2 Speedup vs Threads
+### 17.2 Speedup vs Threads
+
+Design:
 
 ```text
-X-axis: Threads or processes
+X-axis: Workers
 Y-axis: Speedup
-Include: Ideal speedup line y = x
+Lines: Pthreads, OpenMP, MPI
+Reference line: Ideal speedup y = x
+Separate plots or facets: Input sizes
 ```
 
 Interpretation:
 
-If the measured curve is close to the ideal line, scaling is good. If it flattens, overhead or sequential work is limiting performance.
+Curves close to the ideal line indicate good scaling. Flattening curves indicate synchronization, communication, memory bandwidth, or serial bottlenecks.
 
-### 12.3 Efficiency vs Threads
+### 17.3 Efficiency vs Threads
+
+Design:
 
 ```text
-X-axis: Threads or processes
+X-axis: Workers
 Y-axis: Efficiency
+Reference line: y = 1
+Lines: Pthreads, OpenMP, MPI
 ```
 
 Interpretation:
 
-Efficiency near `1.0` is ideal. Decreasing efficiency means additional workers are contributing less useful work.
+Efficiency near `1.0` means workers are used effectively. Declining efficiency means each additional worker contributes less useful work.
 
-### 12.4 Strong Scaling
+### 17.4 Strong Scaling
+
+Design:
 
 ```text
 X-axis: Workers
-Y-axis: Execution time
-Separate lines: Different input sizes
+Y-axis: Mean execution time
+Lines: One line per input size
+Separate graph per implementation
 ```
 
 Interpretation:
 
-A good strong scaling curve decreases as workers increase. If the line flattens, the implementation has reached a scalability limit.
+For fixed input size, runtime should decrease as workers increase. If runtime increases, overhead is greater than the benefit of parallelism. Small inputs are expected to scale poorly.
 
-### 12.5 Weak Scaling
+### 17.5 Weak Scaling
+
+Design:
 
 ```text
 X-axis: Workers
-Y-axis: Execution time
+Y-axis: Mean execution time
+Lines: Pthreads, OpenMP, MPI
 ```
 
 Interpretation:
 
-An ideal weak scaling curve is flat. If runtime increases, overhead grows with worker count.
+Ideal weak scaling is flat. Increasing runtime indicates growing overhead, memory bandwidth saturation, or communication cost.
 
-### 12.6 Execution Time Comparison
+### 17.6 Execution Time Comparison
+
+Design:
 
 ```text
 Graph type: Grouped bar chart
 X-axis: Input size
-Y-axis: Execution time
+Y-axis: Mean execution time
 Bars: Sequential, Pthreads, OpenMP, MPI
+Worker count: Fixed, for example 4
 ```
 
 Interpretation:
 
-This graph shows which implementation is fastest for each input size.
+This graph shows which implementation is fastest at each problem size. It is useful for identifying the crossover point where parallelism becomes beneficial.
 
-### 12.7 Pthreads vs OpenMP
+### 17.7 Pthreads vs OpenMP
+
+Design:
 
 ```text
 X-axis: Thread count
 Y-axis: Runtime or speedup
-Lines: Pthreads, OpenMP
+Lines: Pthreads and OpenMP
+Separate plots: Selected input sizes
 ```
 
 Interpretation:
 
-This graph compares manual threading against compiler-directed threading.
+This graph compares manual threading with directive-based threading. Differences may come from barrier implementation, scheduling overhead, runtime behavior, and cache locality.
 
-### 12.8 MPI vs OpenMP
+### 17.8 MPI vs OpenMP
+
+Design:
 
 ```text
-X-axis: Worker count
+X-axis: Workers
 Y-axis: Runtime or speedup
-Lines: MPI, OpenMP
+Lines: MPI and OpenMP
 ```
 
 Interpretation:
 
-This graph compares distributed-process overhead against shared-memory overhead.
+This graph compares process-level parallelism with shared-memory threading. MPI is expected to have more communication overhead but may perform well on batches of independent alignments.
 
-### 12.9 Hybrid Comparison
+### 17.9 Hybrid Comparison
 
-The current project does not yet implement MPI + OpenMP hybrid parallelism.
+The current project does not implement MPI + OpenMP hybrid parallelism. Include this graph only as a future-work design unless a hybrid implementation is added.
 
-For future work, use:
+Design:
 
 ```text
 X-axis: Total workers
@@ -496,72 +761,74 @@ Lines: MPI, OpenMP, MPI+OpenMP
 
 Interpretation:
 
-Hybrid parallelism should be useful on clusters where each node has multiple CPU cores.
+Hybrid parallelism can reduce the number of MPI processes per node while using OpenMP threads inside each process. It is expected to be useful on clusters with multiple cores per node.
 
-## 13. IEEE-Style Reporting Requirements
+## 18. Recommended Reporting Structure
 
-Record the following system information:
-
-```text
-CPU model
-Number of cores
-Number of hardware threads
-RAM size
-Operating system
-Compiler name and version
-Compiler flags
-MPI implementation and version
-OpenMP version
-Random seed
-Number of repetitions
-Outlier removal method
-```
-
-Also report:
+Use the following structure in the final report:
 
 ```text
-All implementations use the same scoring scheme.
-Correctness was verified before benchmarking.
-Speedup is computed relative to the sequential implementation.
-Raw outputs and CSV files are preserved for reproducibility.
+Experimental Setup
+Correctness Validation
+Execution Time Analysis
+Strong Scaling Analysis
+Weak Scaling Analysis
+Speedup and Efficiency
+Overhead Analysis
+Threats to Validity
+Conclusion
 ```
 
-## 14. Final Benchmarking Checklist
+Mention threats to validity:
+
+- VM scheduling noise
+- Oversubscription for 8 MPI processes
+- Limited number of repetitions
+- Timing differences between implementations
+- Memory pressure for very large matrices
+- Random input variability
+
+## 19. Final Benchmarking Checklist
 
 Before collecting final results:
 
 ```text
 [ ] Clean and rebuild all binaries.
-[ ] Record compiler and system information.
-[ ] Generate inputs using a fixed seed.
-[ ] Verify correctness against the sequential baseline.
-[ ] Run a warm-up execution before timed runs.
-[ ] Run each configuration at least 5 times.
-[ ] Prefer 10 repetitions for final results.
-[ ] Save all raw outputs.
-[ ] Save CSV summaries.
-[ ] Remove outliers using a documented method.
-[ ] Compute mean runtime and standard deviation.
+[ ] Record system information.
+[ ] Record compiler and MPI versions.
+[ ] Generate inputs with a fixed seed.
+[ ] Verify correctness against sequential baseline.
+[ ] Run one warm-up per configuration.
+[ ] Run at least 5 measured repetitions.
+[ ] Prefer 10 measured repetitions for final reporting.
+[ ] Save raw outputs.
+[ ] Save raw repetition CSV.
+[ ] Remove outliers using documented method.
+[ ] Compute mean, median, standard deviation, min, and max.
 [ ] Compute speedup and efficiency.
+[ ] Mark oversubscribed MPI runs clearly.
 [ ] Plot execution time vs input size.
 [ ] Plot speedup vs workers.
 [ ] Plot efficiency vs workers.
 [ ] Plot strong scaling.
 [ ] Plot weak scaling.
-[ ] Compare Pthreads vs OpenMP.
-[ ] Compare MPI vs OpenMP.
-[ ] Discuss overheads and scalability limits.
-[ ] Do not report failed or incorrect runs as benchmark data.
+[ ] Plot Pthreads vs OpenMP.
+[ ] Plot MPI vs OpenMP.
+[ ] Discuss barrier overhead.
+[ ] Discuss communication overhead.
+[ ] Discuss load imbalance.
+[ ] Discuss false sharing.
+[ ] Discuss cache locality.
+[ ] Discuss memory bandwidth.
+[ ] Do not include failed or incorrect runs in final averages.
 ```
 
-## 15. Expected Interpretation
+## 20. Expected Overall Interpretation
 
-Small inputs are expected to show limited or negative speedup because overhead dominates computation.
+Small inputs are expected to show poor parallel performance because synchronization and startup overhead dominate the dynamic programming computation.
 
-Medium and large inputs should show better speedup because the dynamic programming matrix contains more work.
+Medium inputs should begin to benefit from parallel execution, especially OpenMP and MPI task farming.
 
-Pthreads and OpenMP should generally outperform MPI on a single shared-memory machine for one alignment.
+Large inputs should expose the true scalability limits of the implementations. Performance may eventually plateau because Needleman-Wunsch is memory intensive and the wavefront approach requires frequent synchronization.
 
-MPI should become more useful when many independent sequence pairs are processed across multiple processes or nodes.
-
-Very large inputs may become limited by memory capacity and memory bandwidth rather than CPU compute.
+MPI should be interpreted carefully. It is most meaningful for batches of independent sequence pairs. On a single VM, especially with oversubscription, MPI process counts above the available cores should be treated as functional experiments rather than true hardware scaling results.
