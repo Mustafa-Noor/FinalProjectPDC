@@ -358,6 +358,10 @@ Performance notes:
 - The `50000` input can require very large memory because full score and traceback matrices are stored.
 - If a benchmark run is interrupted, rerun the script to regenerate a complete result set.
 
+## AI Assistance Disclosure
+
+This project used limited AI assistance for proofreading, organizing documentation, checking rubric coverage, and improving explanatory wording. The algorithm design, C implementations, benchmark script, experiment runs, result interpretation, and final project decisions were reviewed and validated by the author.
+
 ## Troubleshooting
 
 `make: command not found`
